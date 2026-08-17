@@ -33,7 +33,7 @@ enum Arranger {
 
         drag(fromX: item.frame.minX + item.frame.width / 2, toX: targetX)
         // Give the bar a moment to settle before believing anything.
-        Thread.sleep(forTimeInterval: 0.5)
+        Thread.sleep(forTimeInterval: 0.25)
 
         guard let landed = AXMenuBar.items().first(where: { $0.pid == item.pid })?.frame else {
             return .failure(.didNotLand(name: item.name, at: item.frame.minX))
@@ -46,35 +46,47 @@ enum Arranger {
         return .success(landed)
     }
 
-    private static func drag(fromX: CGFloat, toX: CGFloat, steps: Int = 24) {
+    private static func drag(fromX: CGFloat, toX: CGFloat, steps: Int = 14) {
         guard let source = CGEventSource(stateID: .hidSystemState) else { return }
+        // Where the pointer was before we borrowed it. Moving someone's cursor to
+        // the menu bar is startling enough; leaving it there is rude.
+        let origin = NSEvent.mouseLocation
         // Keep the user's real mouse from fighting the synthetic drag.
         source.setLocalEventsFilterDuringSuppressionState(
             [.permitLocalMouseEvents, .permitLocalKeyboardEvents, .permitSystemDefinedEvents],
             state: .eventSuppressionStateSuppressionInterval
         )
 
-        func post(_ type: CGEventType, _ x: CGFloat) {
+        func post(_ type: CGEventType, at point: CGPoint, flags: CGEventFlags = .maskCommand) {
             guard let event = CGEvent(
                 mouseEventSource: source,
                 mouseType: type,
-                mouseCursorPosition: CGPoint(x: x, y: menuBarY),
+                mouseCursorPosition: point,
                 mouseButton: .left
             ) else { return }
-            event.flags = .maskCommand
+            event.flags = flags
             event.post(tap: .cghidEventTap)
         }
 
+        func post(_ type: CGEventType, _ x: CGFloat) {
+            post(type, at: CGPoint(x: x, y: menuBarY))
+        }
+
         post(.mouseMoved, fromX)
-        usleep(120_000)
+        usleep(70_000)
         post(.leftMouseDown, fromX)
-        usleep(120_000)
+        usleep(70_000)
         for step in 1...steps {
             let progress = CGFloat(step) / CGFloat(steps)
             post(.leftMouseDragged, fromX + (toX - fromX) * progress)
-            usleep(18_000)
+            usleep(14_000)
         }
-        usleep(120_000)
+        usleep(70_000)
         post(.leftMouseUp, toX)
+
+        // Put the pointer back. `NSEvent.mouseLocation` is bottom-left origin and
+        // CGEvent is top-left, so the y flips around the primary screen's height.
+        let height = NSScreen.screens.first?.frame.height ?? 0
+        post(.mouseMoved, at: CGPoint(x: origin.x, y: height - origin.y), flags: [])
     }
 }
