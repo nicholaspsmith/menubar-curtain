@@ -40,10 +40,14 @@ final class PanelMenu: NSObject, NSMenuDelegate {
                 pidForMenu[ObjectIdentifier(submenu)] = app.pid
                 item.submenu = submenu
             } else {
-                // Nothing to present, so offer the only other way in.
-                item.action = #selector(reveal)
+                // No menu to present, so press the icon itself — for an app like
+                // Bitwarden that press is how it opens. Falling back to revealing
+                // the bar was worse than useless: picking the app did something
+                // unrelated to the app.
+                item.action = #selector(openApp(_:))
                 item.target = self
-                item.toolTip = "\(app.name) does not publish its menu; showing the icons instead."
+                item.representedObject = RowRef(pid: app.pid, index: -1)
+                item.toolTip = "\(app.name) publishes no menu; this opens it directly."
             }
             menu.addItem(item)
         }
@@ -99,9 +103,21 @@ final class PanelMenu: NSObject, NSMenuDelegate {
         }
     }
 
+    /// Driving another app's menu has to wait until ours has finished closing.
+    /// Pressed inline, the action is swallowed — measured against Tailscale,
+    /// where the identical press works standalone and does nothing from here.
+    private func afterMenuCloses(_ work: @escaping () -> Void) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: work)
+    }
+
     @objc private func pressRow(_ sender: NSMenuItem) {
         guard let ref = sender.representedObject as? RowRef else { return }
-        AXMenuDriver.press(rowIndex: ref.index, forPID: ref.pid)
+        afterMenuCloses { AXMenuDriver.press(rowIndex: ref.index, forPID: ref.pid) }
+    }
+
+    @objc private func openApp(_ sender: NSMenuItem) {
+        guard let ref = sender.representedObject as? RowRef else { return }
+        afterMenuCloses { AXMenuDriver.pressItem(forPID: ref.pid) }
     }
 
     @objc private func reveal() {

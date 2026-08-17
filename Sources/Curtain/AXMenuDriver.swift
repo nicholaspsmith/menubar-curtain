@@ -66,6 +66,18 @@ enum AXMenuDriver {
         return AXUIElementPerformAction(rows[rowIndex], kAXPressAction as CFString) == .success
     }
 
+    /// Press the status item itself, which for an app with no menu — Bitwarden,
+    /// say — is how it opens. The only way in for apps the panel cannot read.
+    @discardableResult
+    static func pressItem(forPID pid: pid_t) -> Bool {
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, timeout)
+        guard let bar = element(app, "AXExtrasMenuBar"),
+              let item = children(of: bar).first
+        else { return false }
+        return AXUIElementPerformAction(item, kAXPressAction as CFString) == .success
+    }
+
     // MARK: - AX plumbing
 
     /// - Parameter allowPress: whether we may press the status item to make its
