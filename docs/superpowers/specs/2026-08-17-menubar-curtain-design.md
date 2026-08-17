@@ -99,12 +99,36 @@ changed the design:
    and overshoots (881pt); the next poll recomputes from the settled edge and
    converges (470pt), stable across subsequent ticks.
 
-**Open:** the chevron does not render. Neither a composited SF Symbol image nor a
-right-aligned attributed title produced visible ink at the item's right edge,
-though the item itself is present and its menu works. Unverified visually since
-the screen locked mid-session; the fallback if right-alignment cannot be made to
-work is a narrow always-visible sibling item positioned by a one-time verified
-drag (the mechanism Task 7 builds anyway).
+### Peek findings (2026-08-17)
+
+4. **Yield by width, never by `isVisible`.** Hiding a status item makes macOS
+   *discard* its remembered position. Measured: four apps lost their
+   `Preferred Position` keys across a single peek and returned at x≈-1200 —
+   inside the block that was meant to be hidden. Writing the saved value back
+   before un-hiding does not help; it is cleared again. `length = 0` frees
+   essentially the same space, keeps the item present, and leaves placement
+   untouched.
+5. **Closing a peek must widen the line before restoring the siblings.** During a
+   peek the visible strip is full of the revealed block, so siblings restored
+   into it have nowhere to go and land in the hidden block. Growing the line
+   first clears the strip; the restore broadcast follows 0.6s later. (Opening
+   needs no such care — the layout reflows on its own as items shrink.)
+6. **An over-full bar ignores rank.** With every icon present the bar places
+   items where they fit rather than where their preferred position says, and our
+   own apps ended up behind the notch. Placement only settles predictably once
+   the curtain has freed space, which means the recovery order after any mishap
+   is: curtain hiding first, then restart the affected apps.
+
+### Interaction (2026-08-17)
+
+Left click toggles the curtain; right click (and control-click) opens the menu.
+The handle's chevron flips to show state — `❮` hidden, `❯` revealed. A reveal ends
+either by clicking again or on a timer, selectable under "When Showing";
+click-to-close is the default, since a timer that yanks the bar back is worse
+than an explicit click.
+
+**Resolved:** the chevron now renders, because the handle is a separate narrow
+item. Nothing was wrong with the drawing — a wide item simply never draws at all.
 
 ## Non-goals
 

@@ -20,9 +20,15 @@ final class App: NSObject, NSApplicationDelegate {
     /// False until the menu bar has had a chance to place our narrow items.
     private var hasSettled = false
     private var rehideTimer: Timer?
+    private var revealMode = RevealModeStore.load(from: .standard)
+    private var peekToken = UUID().uuidString
     private static let settleDelay: TimeInterval = 1.5
-    /// How long a reveal lasts before it puts itself away.
-    private static let revealDuration: TimeInterval = 15
+    /// Long enough for the siblings to reappear and be placed before the line
+    /// widens over the space they need.
+    private static let restoreDelay: TimeInterval = 0.6
+    /// Comfortably longer than the 5s poll that refreshes it, short enough that a
+    /// crashed Curtain returns the sibling icons quickly.
+    private static let yieldTTL: TimeInterval = 15
 
     /// Where to park our two items on a bar we have never seen.
     ///
@@ -47,7 +53,8 @@ final class App: NSObject, NSApplicationDelegate {
             pollInterval: 5,
             onPoll: { [weak self] in self?.applyState() },
             onBuildMenu: { [weak self] menu in self?.buildMenu(menu) },
-            autosaveName: "CurtainHandle"
+            autosaveName: "CurtainHandle",
+            onPrimaryClick: { [weak self] in self?.toggle() }
         )
         handle = Handle(controller: controller)
         controller.start()
@@ -77,6 +84,16 @@ final class App: NSObject, NSApplicationDelegate {
         if isHidden {
             line.hide()
         } else {
+            // Ask the sibling apps for their slots *before* collapsing, so the
+            // block has somewhere to land. Without this a reveal just slides the
+            // icons behind the notch — the bar has about 43pt spare and the block
+            // needs ten times that.
+            //
+            // Re-posted on every poll tick rather than once: each client arms a
+            // short self-restore timer from the TTL, so a crashed Curtain can
+            // never leave their icons hidden. Refreshing it is what holds the
+            // reveal open.
+            MenuBarYield.post(.init(state: .yield, token: peekToken, ttl: Self.yieldTTL))
             line.show()
         }
     }
@@ -121,6 +138,10 @@ final class App: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
+        let reveal = NSMenuItem(title: "When Showing", action: nil, keyEquivalent: "")
+        reveal.submenu = buildRevealMenu()
+        menu.addItem(reveal)
+
         let login = actionItem("Start at Login", #selector(toggleLogin))
         login.state = LoginItem.isEnabled ? .on : .off
         menu.addItem(login)
@@ -139,25 +160,65 @@ final class App: NSObject, NSApplicationDelegate {
         NSMenuItem(title: title, action: nil, keyEquivalent: "")
     }
 
+    /// Rebuilt on every open, so the checkmark always reflects the live choice.
+    private func buildRevealMenu() -> NSMenu {
+        let menu = NSMenu()
+        for mode in RevealMode.allCases {
+            let item = actionItem(mode.label, #selector(selectRevealMode(_:)))
+            item.representedObject = mode.rawValue
+            item.state = mode == revealMode ? .on : .off
+            menu.addItem(item)
+        }
+        return menu
+    }
+
     // MARK: - Menu selectors
 
-    /// Revealing is always temporary.
-    ///
-    /// A packed bar has no room for the block *and* our handle, so revealing
-    /// squeezes the handle into the notch sliver where it draws nothing — the
-    /// control vanishes and there is no way back. Rather than leave that trap,
-    /// a reveal reverses itself.
+    /// Left-clicking the handle flips the curtain; the chevron flips with it, so
+    /// the icon itself says which way round things are.
     @objc private func toggle() {
         isHidden.toggle()
-        applyState()
+        if !isHidden { peekToken = UUID().uuidString }
+
+        if isHidden {
+            // Widen the line *first*, then hand the slots back. During a peek the
+            // visible strip is full of the revealed block, so siblings restored
+            // into it have nowhere to go and land inside the hidden block
+            // instead — measured, all four at x≈-1200. Growing the line clears
+            // the strip, and only then is there room for them to return to their
+            // ranked spots.
+            applyState()
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.restoreDelay) { [weak self] in
+                guard let self, self.isHidden else { return }
+                MenuBarYield.post(.init(state: .restore, token: self.peekToken, ttl: 0))
+            }
+        } else {
+            applyState()
+        }
 
         rehideTimer?.invalidate()
         rehideTimer = nil
-        guard !isHidden else { return }
-        rehideTimer = Timer.scheduledTimer(withTimeInterval: Self.revealDuration, repeats: false) { [weak self] _ in
+        guard !isHidden, revealMode == .timeout else { return }
+        rehideTimer = Timer.scheduledTimer(
+            withTimeInterval: RevealModeStore.timeoutDuration,
+            repeats: false
+        ) { [weak self] _ in
             guard let self, !self.isHidden else { return }
             self.isHidden = true
             self.applyState()
+        }
+    }
+
+    @objc private func selectRevealMode(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let mode = RevealMode(rawValue: raw)
+        else { return }
+        revealMode = mode
+        RevealModeStore.save(mode, to: .standard)
+        // A mode change must not strand a reveal under the old rules.
+        if mode == .toggle {
+            rehideTimer?.invalidate()
+            rehideTimer = nil
         }
     }
 
