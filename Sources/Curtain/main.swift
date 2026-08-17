@@ -290,11 +290,14 @@ final class App: NSObject, NSApplicationDelegate {
         let wasHidden = isHidden
         if isHidden { toggle() }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+        // Long enough for the reveal to settle so positions can be trusted, short
+        // enough that the shuffle is a blink rather than a performance. Both
+        // waits were originally padded while the reflow was still unfamiliar.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
             guard let self else { return }
             defer {
                 if wasHidden, !self.isHidden {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { self.toggle() }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self.toggle() }
                 }
             }
 
