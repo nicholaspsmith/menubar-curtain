@@ -51,6 +51,85 @@ gone. That is a design property, not a misconfiguration.
    871–1498, leaving **43 free points**. The 9 hidden icons total ≈280pt, so a
    plain in-place "show all" is impossible here — hence peek.
 
+## Phase 0 result (measured 2026-08-17)
+
+**Synthesized Cmd-drag works.** Dragging ProcessMonitor's item from x=1166 to a
+requested x=1080 landed it at x=1071 (within 9pt), swapped it cleanly with its
+neighbour, and **persisted**: its `NSStatusItem Preferred Position` went 248 →
+296. Dragging it back restored the original order exactly. Task 7 proceeds as
+specced.
+
+Three details that constrain the implementation:
+
+1. **AX coordinates feed `CGEvent` directly.** Both use a top-left origin, so an
+   item reported by AX at `(1166, 2)` with size `(37, 24)` is pressed at
+   `(1184, 14)` with no conversion. (`NSWindow.frame` does *not* share this
+   origin — converting from AppKit was the bug in the first probe attempt.)
+2. **An off-screen item cannot be dragged at all.** The cursor clamps to the
+   screen, so a press at x=-4300 never reaches the item. Arranging must therefore
+   run with the block *shown*, never while hidden.
+3. **A jammed bar places new items left of the notch.** With Ice quit and all 9
+   icons back, a fresh fixture item landed at x=629 — left of the notch, where it
+   is neither visible nor pressable.
+
+**Ice restores blindly on quit, straight into the dead zone.** Quitting Ice
+returned Tailscale, UA Mixer Engine and UA Connect from x≈-4300 to x=722, 750 and
+792 — all inside the notch (which starts at 668 and ends at 828), all invisible.
+This is the 2026-08-16 bug happening three times at once, it confirms the
+migration risk, and it is precisely what the watchdog exists to catch. Run
+`scripts/snapshot-positions.sh` before any cutover.
+
+## Implementation findings (2026-08-17)
+
+Three constraints discovered while building the curtain item, each of which
+changed the design:
+
+1. **Place narrow, then grow.** A status item created — or re-placed — while
+   already wide does not fit at its ranked position, so macOS puts it wherever it
+   will go and shoves every other icon aside. Measured: a 438pt item landed
+   *right* of all four of our apps and hid the lot. Created narrow it takes its
+   ranked spot, and growing then pins the right edge and pushes only leftward.
+   The app therefore shows narrow on launch and on every display change, waits
+   1.5s for placement, and only then applies the real state.
+2. **Line and handle must be the same item.** With two items, the handle is the
+   one a full bar bumps — it landed at x=-208, inside the hidden block, leaving
+   no way to unhide. One item, with its control drawn at the right edge, always
+   has a reachable control because the right edge never moves.
+3. **The width self-corrects.** The first hide computes from a stale right edge
+   and overshoots (881pt); the next poll recomputes from the settled edge and
+   converges (470pt), stable across subsequent ticks.
+
+### Peek findings (2026-08-17)
+
+4. **Yield by width, never by `isVisible`.** Hiding a status item makes macOS
+   *discard* its remembered position. Measured: four apps lost their
+   `Preferred Position` keys across a single peek and returned at x≈-1200 —
+   inside the block that was meant to be hidden. Writing the saved value back
+   before un-hiding does not help; it is cleared again. `length = 0` frees
+   essentially the same space, keeps the item present, and leaves placement
+   untouched.
+5. **Closing a peek must widen the line before restoring the siblings.** During a
+   peek the visible strip is full of the revealed block, so siblings restored
+   into it have nowhere to go and land in the hidden block. Growing the line
+   first clears the strip; the restore broadcast follows 0.6s later. (Opening
+   needs no such care — the layout reflows on its own as items shrink.)
+6. **An over-full bar ignores rank.** With every icon present the bar places
+   items where they fit rather than where their preferred position says, and our
+   own apps ended up behind the notch. Placement only settles predictably once
+   the curtain has freed space, which means the recovery order after any mishap
+   is: curtain hiding first, then restart the affected apps.
+
+### Interaction (2026-08-17)
+
+Left click toggles the curtain; right click (and control-click) opens the menu.
+The handle's chevron flips to show state — `❮` hidden, `❯` revealed. A reveal ends
+either by clicking again or on a timer, selectable under "When Showing";
+click-to-close is the default, since a timer that yanks the bar back is worse
+than an explicit click.
+
+**Resolved:** the chevron now renders, because the handle is a separate narrow
+item. Nothing was wrong with the drawing — a wide item simply never draws at all.
+
 ## Non-goals
 
 Menu-bar appearance styling, menu-bar search, multiple hidden sections,

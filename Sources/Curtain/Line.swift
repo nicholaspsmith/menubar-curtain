@@ -1,0 +1,36 @@
+import AppKit
+import CurtainCore
+
+/// The curtain proper: an invisible status item whose *width* pushes its
+/// left-hand neighbours off the display.
+///
+/// It draws nothing, and it cannot: macOS renders a status item only when its
+/// slot fits entirely inside the usable area (right of the notch). This one is
+/// hundreds of points wide by design, so it always overlaps the notch and is
+/// always invisible — measured by filling it with 80 glyphs and seeing none of
+/// them. That is fine. Occupying width is its whole job; `Handle` is the part
+/// the user sees and clicks.
+final class Line {
+    private let item: NSStatusItem
+
+    /// Wide enough to push any realistic block clear off the left edge, far
+    /// below the ~5012pt clamp. Precision would be pointless: overshooting only
+    /// pushes hidden icons further off-screen, and the app cannot measure its own
+    /// position reliably anyway — a status item's window frame disagrees with its
+    /// true screen position by hundreds of points, because these items are hosted
+    /// by Control Center rather than by us.
+    static let hiddenWidth: CGFloat = 2000
+
+    init() {
+        item = NSStatusBar.system.statusItem(withLength: CurtainGeometry.showWidth)
+        item.autosaveName = "CurtainLine"
+        item.button?.title = ""
+        item.button?.image = nil
+    }
+
+    var width: CGFloat { item.length }
+
+    func hide() { item.length = Self.hiddenWidth }
+
+    func show() { item.length = CurtainGeometry.showWidth }
+}

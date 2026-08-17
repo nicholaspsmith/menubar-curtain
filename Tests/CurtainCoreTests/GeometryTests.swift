@@ -1,0 +1,50 @@
+import XCTest
+@testable import CurtainCore
+
+final class GeometryTests: XCTestCase {
+    /// The real built-in display, measured 2026-08-16: notch ends at x=828,
+    /// menu bar runs to x=1496.
+    private let screen = MenuBarGeometry(usableMinX: 828, usableMaxX: 1496)
+
+    func testItemInTheNotchSliverIsDeadZone() {
+        // KeyLight's actual stranded frame: on paper inside the usable area,
+        // in practice invisible.
+        let stranded = ItemFrame(minX: 837, width: 32)
+        XCTAssertEqual(CurtainGeometry.placement(of: stranded, in: screen), .deadZone)
+    }
+
+    func testItemClearOfTheSliverIsVisible() {
+        // Where repositioning in Ice put it, and where it rendered fine.
+        XCTAssertEqual(CurtainGeometry.placement(of: ItemFrame(minX: 919, width: 32), in: screen), .visible)
+    }
+
+    func testItemRestoredIntoTheNotchIsDeadZone() {
+        // What quitting Ice did to Tailscale on 2026-08-17.
+        XCTAssertEqual(CurtainGeometry.placement(of: ItemFrame(minX: 722, width: 24), in: screen), .deadZone)
+    }
+
+    func testItemPushedOffTheLeftEdgeIsHidden() {
+        XCTAssertEqual(CurtainGeometry.placement(of: ItemFrame(minX: -4253, width: 24), in: screen), .hidden)
+    }
+
+    func testHideWidthPushesWholeBlockPastUsableEdge() {
+        let width = CurtainGeometry.hideWidth(lineRightEdge: 871, blockWidth: 280, in: screen)
+        // The block hangs off the line's left edge; all of it must end up left
+        // of the usable area.
+        XCTAssertLessThanOrEqual(871 - width, screen.usableMinX - 280)
+        XCTAssertLessThanOrEqual(width, CurtainGeometry.maxLineWidth)
+    }
+
+    func testHideWidthNeverExceedsTheClamp() {
+        let width = CurtainGeometry.hideWidth(lineRightEdge: 1490, blockWidth: 9000, in: screen)
+        XCTAssertEqual(width, CurtainGeometry.maxLineWidth)
+    }
+
+    func testDisplayWithoutANotchHasNoDeadZone() {
+        // The dead zone is a notch artifact. On an external display the usable
+        // area starts at 0 and an item near the left edge draws fine, so the
+        // margin must collapse to zero rather than cry wolf.
+        let external = MenuBarGeometry(usableMinX: 0, usableMaxX: 2560)
+        XCTAssertEqual(CurtainGeometry.placement(of: ItemFrame(minX: 4, width: 24), in: external), .visible)
+    }
+}
