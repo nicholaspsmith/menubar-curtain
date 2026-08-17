@@ -9,16 +9,9 @@ import CurtainCore
 /// read live over the accessibility API, so a hidden app stays usable without any
 /// icon moving anywhere.
 final class PanelMenu: NSObject, NSMenuDelegate {
-    /// Apps whose menu we cannot read (Mullvad and Raycast expose nothing to AX)
-    /// get this action instead, which reveals the block in the bar.
-    private let onReveal: () -> Void
     private var pidForMenu: [ObjectIdentifier: pid_t] = [:]
 
-    init(onReveal: @escaping () -> Void) {
-        self.onReveal = onReveal
-    }
-
-    func build(hidden apps: [HiddenApp], isRevealed: Bool) -> NSMenu {
+    func build(hidden apps: [HiddenApp]) -> NSMenu {
         let menu = NSMenu()
         pidForMenu.removeAll()
 
@@ -51,15 +44,6 @@ final class PanelMenu: NSObject, NSMenuDelegate {
             }
             menu.addItem(item)
         }
-
-        menu.addItem(.separator())
-        let revealItem = NSMenuItem(
-            title: isRevealed ? "Hide Icons in Menu Bar" : "Show Icons in Menu Bar",
-            action: #selector(reveal),
-            keyEquivalent: ""
-        )
-        revealItem.target = self
-        menu.addItem(revealItem)
         return menu
     }
 
@@ -118,9 +102,5 @@ final class PanelMenu: NSObject, NSMenuDelegate {
     @objc private func openApp(_ sender: NSMenuItem) {
         guard let ref = sender.representedObject as? RowRef else { return }
         afterMenuCloses { AXMenuDriver.pressItem(forPID: ref.pid) }
-    }
-
-    @objc private func reveal() {
-        onReveal()
     }
 }
