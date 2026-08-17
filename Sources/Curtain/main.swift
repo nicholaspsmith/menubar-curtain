@@ -7,41 +7,47 @@ import StatusItemKit
 ///
 /// See docs/superpowers/specs/2026-08-17-menubar-curtain-design.md for why that
 /// distinction is the entire point of the app.
+///
+/// Two items, because they cannot be one: macOS renders a status item only when
+/// its slot fits entirely within the usable area right of the notch, so the
+/// curtain — hundreds of points wide — is permanently invisible, and the control
+/// has to be a separate narrow item beside the user's own icons.
 final class App: NSObject, NSApplicationDelegate {
-    private var handle: StatusItemController!
-    private var curtain: CurtainItem!
+    private var controller: StatusItemController!
+    private var handle: Handle!
+    private let line = Line()
     private var isHidden = true
-    /// False until the menu bar has had a chance to place our narrow item.
+    /// False until the menu bar has had a chance to place our narrow items.
     private var hasSettled = false
     private static let settleDelay: TimeInterval = 1.5
 
-    /// Where to park the curtain on a bar we have never seen.
+    /// Where to park our two items on a bar we have never seen.
     ///
     /// The preferred-position scale is opaque and relative to whatever else is
-    /// installed; 600 sits just left of this machine's leftmost third-party icon,
-    /// which is the right neighbourhood. The user can Cmd-drag it anywhere, and
-    /// macOS persists wherever they leave it.
-    private static let defaultPosition: Double = 600
-    private static let positionKey = "NSStatusItem Preferred Position Curtain"
+    /// installed, and larger means further left. The line must rank left of the
+    /// icons to keep and right of the icons to hide; the handle ranks just right
+    /// of the line so it lands in the visible strip. The user can Cmd-drag either
+    /// one, and macOS persists wherever they leave it.
+    private static let defaults: [String: Double] = [
+        "NSStatusItem Preferred Position CurtainLine": 600,
+        "NSStatusItem Preferred Position CurtainHandle": 590,
+    ]
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Seed the position before the item exists — macOS reads this when the
-        // item is created, and never again.
-        if UserDefaults.standard.object(forKey: Self.positionKey) == nil {
-            UserDefaults.standard.set(Self.defaultPosition, forKey: Self.positionKey)
+        // Seed positions before the items exist — macOS reads these when an item
+        // is created, and never again.
+        for (key, value) in Self.defaults where UserDefaults.standard.object(forKey: key) == nil {
+            UserDefaults.standard.set(value, forKey: key)
         }
 
-        handle = StatusItemController(
+        controller = StatusItemController(
             pollInterval: 5,
-            // Re-apply rather than merely redraw: the line's width depends on
-            // where the system placed it, which is not known at launch and can
-            // change when another app appears or a display is reconfigured.
             onPoll: { [weak self] in self?.applyState() },
             onBuildMenu: { [weak self] menu in self?.buildMenu(menu) },
-            autosaveName: "Curtain"
+            autosaveName: "CurtainHandle"
         )
-        curtain = CurtainItem(controller: handle)
-        handle.start()
+        handle = Handle(controller: controller)
+        controller.start()
         settleThenApply()
 
         NotificationCenter.default.addObserver(
@@ -55,39 +61,36 @@ final class App: NSObject, NSApplicationDelegate {
     // MARK: - Curtain state
 
     private func applyState() {
-        // Never grow before the system has placed the item. A status item that is
-        // created — or re-placed — while already wide does not fit at its ranked
-        // spot, so macOS drops it wherever it will go and shoves every other icon
-        // aside; measured, it landed right of everything and hid the lot. Placed
-        // narrow first, it takes its ranked spot and then grows leftward with its
-        // right edge pinned, which is the behaviour the whole design rests on.
+        handle.draw(hidden: isHidden)
+
+        // Never widen before the system has placed the line. An item created —
+        // or re-placed — while already wide does not fit at its ranked spot, so
+        // macOS drops it wherever it will go and shoves every other icon aside;
+        // measured, it landed right of everything and hid the lot.
         guard hasSettled else {
-            curtain.show()
+            line.show()
             return
         }
-        let geometry = MenuBarGeometry.current()
         if isHidden {
-            curtain.hide(in: geometry)
+            line.hide()
         } else {
-            curtain.show()
+            line.show()
         }
     }
 
-    /// Show narrow, let the menu bar place us, then apply the real state.
+    /// Stay narrow, let the menu bar place us, then apply the real state.
     private func settleThenApply() {
         hasSettled = false
-        curtain.show()
+        line.show()
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.settleDelay) { [weak self] in
             self?.hasSettled = true
             self?.applyState()
         }
     }
 
-    /// A dock, undock or resolution change moves the notch boundary and every
-    /// item with it, so the line's width has to be recomputed from scratch.
+    /// A dock, undock or resolution change re-places every item, so go narrow and
+    /// let the bar settle before widening again.
     @objc private func screensChanged() {
-        // Placement is decided afresh on a display change, so go narrow and let
-        // the bar settle before growing again.
         settleThenApply()
     }
 
@@ -123,7 +126,7 @@ final class App: NSObject, NSApplicationDelegate {
 
     @objc private func quit() {
         // Leave the bar as we found it rather than with the block off-screen.
-        curtain.show()
+        line.show()
         NSApp.terminate(nil)
     }
 }
