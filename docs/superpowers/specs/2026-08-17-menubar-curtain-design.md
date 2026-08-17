@@ -79,6 +79,33 @@ This is the 2026-08-16 bug happening three times at once, it confirms the
 migration risk, and it is precisely what the watchdog exists to catch. Run
 `scripts/snapshot-positions.sh` before any cutover.
 
+## Implementation findings (2026-08-17)
+
+Three constraints discovered while building the curtain item, each of which
+changed the design:
+
+1. **Place narrow, then grow.** A status item created — or re-placed — while
+   already wide does not fit at its ranked position, so macOS puts it wherever it
+   will go and shoves every other icon aside. Measured: a 438pt item landed
+   *right* of all four of our apps and hid the lot. Created narrow it takes its
+   ranked spot, and growing then pins the right edge and pushes only leftward.
+   The app therefore shows narrow on launch and on every display change, waits
+   1.5s for placement, and only then applies the real state.
+2. **Line and handle must be the same item.** With two items, the handle is the
+   one a full bar bumps — it landed at x=-208, inside the hidden block, leaving
+   no way to unhide. One item, with its control drawn at the right edge, always
+   has a reachable control because the right edge never moves.
+3. **The width self-corrects.** The first hide computes from a stale right edge
+   and overshoots (881pt); the next poll recomputes from the settled edge and
+   converges (470pt), stable across subsequent ticks.
+
+**Open:** the chevron does not render. Neither a composited SF Symbol image nor a
+right-aligned attributed title produced visible ink at the item's right edge,
+though the item itself is present and its menu works. Unverified visually since
+the screen locked mid-session; the fallback if right-alignment cannot be made to
+work is a narrow always-visible sibling item positioned by a one-time verified
+drag (the mechanism Task 7 builds anyway).
+
 ## Non-goals
 
 Menu-bar appearance styling, menu-bar search, multiple hidden sections,
