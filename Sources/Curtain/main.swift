@@ -215,7 +215,10 @@ final class App: NSObject, NSApplicationDelegate {
             in: MenuBarGeometry.current(),
             ownPID: ProcessInfo.processInfo.processIdentifier
         )
-        controller.popUp(panel.build(hidden: apps))
+        controller.popUp(panel.build(
+            hidden: apps,
+            manage: AXMenuBar.isTrusted ? buildManageMenu() : nil
+        ))
     }
 
     // MARK: - Menu selectors

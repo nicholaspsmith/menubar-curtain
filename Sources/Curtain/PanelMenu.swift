@@ -11,7 +11,9 @@ import CurtainCore
 final class PanelMenu: NSObject, NSMenuDelegate {
     private var pidForMenu: [ObjectIdentifier: pid_t] = [:]
 
-    func build(hidden apps: [HiddenApp]) -> NSMenu {
+    /// - Parameter manage: the checklist of which icons are hidden, appended so
+    ///   it sits where someone looking at the hidden items would reach for it.
+    func build(hidden apps: [HiddenApp], manage: NSMenu?) -> NSMenu {
         let menu = NSMenu()
         pidForMenu.removeAll()
 
@@ -42,6 +44,13 @@ final class PanelMenu: NSObject, NSMenuDelegate {
                 item.representedObject = RowRef(pid: app.pid, index: -1)
                 item.toolTip = "\(app.name) publishes no menu; this opens it directly."
             }
+            menu.addItem(item)
+        }
+
+        if let manage {
+            menu.addItem(.separator())
+            let item = NSMenuItem(title: "Manage Icons…", action: nil, keyEquivalent: "")
+            item.submenu = manage
             menu.addItem(item)
         }
         return menu
