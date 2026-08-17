@@ -135,6 +135,12 @@ final class App: NSObject, NSApplicationDelegate {
         // Only once something is above it, or the menu opens on a stray line.
         if !menu.items.isEmpty { menu.addItem(.separator()) }
 
+        if AXMenuBar.isTrusted {
+            let manage = NSMenuItem(title: "Manage Icons", action: nil, keyEquivalent: "")
+            manage.submenu = buildManageMenu()
+            menu.addItem(manage)
+        }
+
         let reveal = NSMenuItem(title: "When Showing", action: nil, keyEquivalent: "")
         reveal.submenu = buildRevealMenu()
         menu.addItem(reveal)
@@ -155,6 +161,38 @@ final class App: NSObject, NSApplicationDelegate {
 
     private func disabledItem(_ title: String) -> NSMenuItem {
         NSMenuItem(title: title, action: nil, keyEquivalent: "")
+    }
+
+    /// One row per menu-bar app, ticked when the curtain is hiding it. Selecting
+    /// a row moves that icon across the line.
+    ///
+    /// A checklist rather than a settings window with an Apply button: each
+    /// toggle is a single drag that either lands or reports why not, so there is
+    /// no pending state to get out of step with the bar.
+    private func buildManageMenu() -> NSMenu {
+        let menu = NSMenu()
+        let geometry = MenuBarGeometry.current()
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+
+        var seen = Set<pid_t>()
+        let apps = AXMenuBar.items()
+            .filter { $0.pid != ownPID }
+            .filter { seen.insert($0.pid).inserted }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+
+        if apps.isEmpty {
+            menu.addItem(disabledItem("No menu bar apps found"))
+            return menu
+        }
+
+        for app in apps {
+            let hidden = CurtainGeometry.placement(of: app.frame, in: geometry) == .hidden
+            let item = actionItem(app.name, #selector(toggleAppHidden(_:)))
+            item.state = hidden ? .on : .off
+            item.representedObject = AppRef(pid: app.pid, name: app.name, isHidden: hidden)
+            menu.addItem(item)
+        }
+        return menu
     }
 
     /// Rebuilt on every open, so the checkmark always reflects the live choice.
@@ -224,6 +262,75 @@ final class App: NSObject, NSApplicationDelegate {
             rehideTimer?.invalidate()
             rehideTimer = nil
         }
+    }
+
+    private final class AppRef: NSObject {
+        let pid: pid_t
+        let name: String
+        let isHidden: Bool
+        init(pid: pid_t, name: String, isHidden: Bool) {
+            self.pid = pid
+            self.name = name
+            self.isHidden = isHidden
+        }
+    }
+
+    /// Move an icon to the other side of the line.
+    ///
+    /// Both directions need the block revealed first. An icon parked off-screen
+    /// cannot be grabbed — the cursor clamps to the display — and the place we
+    /// would drop one *to* is off-screen too. During a reveal the line sits in the
+    /// middle of the strip with items either side of it, so both moves are
+    /// ordinary on-screen drags.
+    @objc private func toggleAppHidden(_ sender: NSMenuItem) {
+        guard let app = sender.representedObject as? AppRef else { return }
+        let wasHidden = isHidden
+        if isHidden { toggle() }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            guard let self else { return }
+            defer {
+                if wasHidden, !self.isHidden {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { self.toggle() }
+                }
+            }
+
+            let ownPID = ProcessInfo.processInfo.processIdentifier
+            let items = AXMenuBar.items()
+            let ours = items.filter { $0.pid == ownPID }
+            guard let lineX = ours.map(\.frame.minX).min(),
+                  let handleX = ours.map(\.frame.maxX).max(),
+                  let target = items.first(where: { $0.pid == app.pid })
+            else { return }
+
+            // Showing drops the icon to the right of the *handle*, not merely
+            // past the line. Ranking it between the two lands it in the leftmost
+            // visible slot — the notch sliver — where it draws nothing: measured,
+            // an icon moved back that way sat invisibly at x=831.
+            let dropX = app.isHidden ? handleX + 45 : lineX - 25
+            let result = Arranger.move(target, toX: dropX, in: MenuBarGeometry.current())
+            if case .failure(let failure) = result {
+                self.report(failure, for: app.name)
+            }
+        }
+    }
+
+    /// Say what went wrong rather than leaving an icon somewhere invisible —
+    /// the silence is what made the original bug so hard to see.
+    private func report(_ failure: Arranger.Failure, for name: String) {
+        let alert = NSAlert()
+        alert.messageText = "Could not move \(name)"
+        switch failure {
+        case .unreachable:
+            alert.informativeText = "Its icon is off-screen, so it cannot be dragged. "
+                + "Show the icons first, then try again."
+        case .didNotLand(_, let at):
+            alert.informativeText = "The drag ran but the icon settled at x=\(Int(at)). "
+                + "Drag it across the chevron by hand with ⌘ held."
+        }
+        alert.alertStyle = .warning
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
     }
 
     @objc private func grantTrust() { AXMenuBar.requestTrust() }

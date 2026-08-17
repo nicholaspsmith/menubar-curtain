@@ -13,18 +13,17 @@ import CurtainCore
 enum Watchdog {
     /// Items sitting where the user can neither see nor click them.
     ///
-    /// Only items to the right of our own line count. Everything left of it is
-    /// the block we hid on purpose — reporting that would be reporting our own
-    /// work back as a fault, and during a reveal the block legitimately rests
-    /// behind the notch on its way in and out.
+    /// Every `.deadZone` item counts, wherever it sits relative to our line. An
+    /// earlier version only looked to the right of the line, reasoning that
+    /// anything left of it was hidden on purpose — and promptly missed a real
+    /// case: an icon moved back across the line landed at x=831, invisible,
+    /// overlapping the line's own span. Deliberately hidden is `.hidden`, off the
+    /// left edge entirely; anything merely lost in the notch is worth saying out
+    /// loud.
     static func stranded(in geometry: MenuBarGeometry, ownPID: pid_t) -> [MenuBarItem] {
-        let all = AXMenuBar.items()
-        let boundary = all.filter { $0.pid == ownPID }.map(\.frame.maxX).max() ?? geometry.usableMinX
-
         var seen = Set<String>()
-        return all
+        return AXMenuBar.items()
             .filter { $0.pid != ownPID }
-            .filter { $0.frame.minX >= boundary }
             .filter { CurtainGeometry.placement(of: $0.frame, in: geometry) == .deadZone }
             // One warning per app: several items from one app say nothing extra.
             .filter { seen.insert($0.name).inserted }
