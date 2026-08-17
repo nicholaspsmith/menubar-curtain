@@ -51,6 +51,34 @@ gone. That is a design property, not a misconfiguration.
    871–1498, leaving **43 free points**. The 9 hidden icons total ≈280pt, so a
    plain in-place "show all" is impossible here — hence peek.
 
+## Phase 0 result (measured 2026-08-17)
+
+**Synthesized Cmd-drag works.** Dragging ProcessMonitor's item from x=1166 to a
+requested x=1080 landed it at x=1071 (within 9pt), swapped it cleanly with its
+neighbour, and **persisted**: its `NSStatusItem Preferred Position` went 248 →
+296. Dragging it back restored the original order exactly. Task 7 proceeds as
+specced.
+
+Three details that constrain the implementation:
+
+1. **AX coordinates feed `CGEvent` directly.** Both use a top-left origin, so an
+   item reported by AX at `(1166, 2)` with size `(37, 24)` is pressed at
+   `(1184, 14)` with no conversion. (`NSWindow.frame` does *not* share this
+   origin — converting from AppKit was the bug in the first probe attempt.)
+2. **An off-screen item cannot be dragged at all.** The cursor clamps to the
+   screen, so a press at x=-4300 never reaches the item. Arranging must therefore
+   run with the block *shown*, never while hidden.
+3. **A jammed bar places new items left of the notch.** With Ice quit and all 9
+   icons back, a fresh fixture item landed at x=629 — left of the notch, where it
+   is neither visible nor pressable.
+
+**Ice restores blindly on quit, straight into the dead zone.** Quitting Ice
+returned Tailscale, UA Mixer Engine and UA Connect from x≈-4300 to x=722, 750 and
+792 — all inside the notch (which starts at 668 and ends at 828), all invisible.
+This is the 2026-08-16 bug happening three times at once, it confirms the
+migration risk, and it is precisely what the watchdog exists to catch. Run
+`scripts/snapshot-positions.sh` before any cutover.
+
 ## Non-goals
 
 Menu-bar appearance styling, menu-bar search, multiple hidden sections,
