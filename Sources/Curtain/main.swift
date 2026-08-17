@@ -54,7 +54,7 @@ final class App: NSObject, NSApplicationDelegate {
             autosaveName: "CurtainHandle",
             onPrimaryClick: { [weak self] in self?.showPanel() }
         )
-        panel = PanelMenu(onReveal: { [weak self] in self?.toggle() })
+        panel = PanelMenu()
         handle = Handle(controller: controller)
         controller.start()
         settleThenApply()
@@ -215,7 +215,10 @@ final class App: NSObject, NSApplicationDelegate {
             in: MenuBarGeometry.current(),
             ownPID: ProcessInfo.processInfo.processIdentifier
         )
-        controller.popUp(panel.build(hidden: apps, isRevealed: !isHidden))
+        controller.popUp(panel.build(
+            hidden: apps,
+            manage: AXMenuBar.isTrusted ? buildManageMenu() : nil
+        ))
     }
 
     // MARK: - Menu selectors

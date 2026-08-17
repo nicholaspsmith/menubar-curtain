@@ -119,6 +119,20 @@ changed the design:
    the curtain has freed space, which means the recovery order after any mishap
    is: curtain hiding first, then restart the affected apps.
 
+### Panel shortcuts (2026-08-17)
+
+Submenu rows carry their app's key equivalents, read from `AXMenuItemCmdChar`,
+`AXMenuItemCmdVirtualKey` and `AXMenuItemCmdModifiers`. The modifier bits are
+their own dialect: command is implied *unless* bit 3 is set, with shift, option
+and control in bits 0–2.
+
+Not every app publishes them, and the absence is the app's choice rather than a
+gap in the reading. Measured: Ollama exposes `⌘,` and `⌘Q`, while every Rectangle
+row reports `char=nil, vkey=nil, mods=8` — no key equivalent at all. Rectangle
+registers its shortcuts as global hotkeys and keeps them in its own preferences
+(`leftHalf = {keyCode 123, modifierFlags 1572864}`), so nothing generic can
+recover them; only per-app glue could, which is not worth the fragility.
+
 ### Interaction (2026-08-17)
 
 Left click toggles the curtain; right click (and control-click) opens the menu.

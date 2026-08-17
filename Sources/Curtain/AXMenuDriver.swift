@@ -6,6 +6,9 @@ struct AXMenuRow {
     let index: Int
     let title: String
     let isEnabled: Bool
+    /// The row's shortcut, ready for `NSMenuItem`. Empty when it has none.
+    let keyEquivalent: String
+    let modifiers: NSEvent.ModifierFlags
     var isSeparator: Bool { title.isEmpty }
 }
 
@@ -32,10 +35,53 @@ enum AXMenuDriver {
             AXMenuRow(
                 index: index,
                 title: string(element, kAXTitleAttribute) ?? "",
-                isEnabled: bool(element, kAXEnabledAttribute) ?? true
+                isEnabled: bool(element, kAXEnabledAttribute) ?? true,
+                keyEquivalent: shortcut(of: element),
+                modifiers: modifiers(of: element)
             )
         }
     }
+
+    // MARK: - Shortcuts
+
+    /// AX publishes a row's shortcut, so the panel can show it the way the app's
+    /// own menu does — Rectangle's halves and thirds are unreadable without it.
+    private static func shortcut(of element: AXUIElement) -> String {
+        if let character = string(element, "AXMenuItemCmdChar"), !character.isEmpty {
+            return character.lowercased()
+        }
+        guard let virtual = int(element, "AXMenuItemCmdVirtualKey"),
+              let scalar = Self.functionKeys[virtual]
+        else { return "" }
+        return String(UnicodeScalar(scalar)!)
+    }
+
+    /// The modifier bits are their own little dialect: command is *implied*
+    /// unless bit 3 says otherwise, which is why Rectangle's ⌃⌥ shortcuts need
+    /// that bit read rather than assumed.
+    private static func modifiers(of element: AXUIElement) -> NSEvent.ModifierFlags {
+        guard let bits = int(element, "AXMenuItemCmdModifiers") else { return [] }
+        var flags: NSEvent.ModifierFlags = []
+        if bits & 0x01 != 0 { flags.insert(.shift) }
+        if bits & 0x02 != 0 { flags.insert(.option) }
+        if bits & 0x04 != 0 { flags.insert(.control) }
+        if bits & 0x08 == 0 { flags.insert(.command) }
+        return flags
+    }
+
+    /// Virtual key codes that have no character, mapped to the private-use
+    /// scalars `NSMenuItem` draws as arrows and function keys.
+    private static let functionKeys: [Int: UInt32] = [
+        0x7E: 0xF700, 0x7D: 0xF701, 0x7B: 0xF702, 0x7C: 0xF703,  // arrows
+        0x7A: 0xF704, 0x78: 0xF705, 0x63: 0xF706, 0x76: 0xF707,  // F1–F4
+        0x60: 0xF708, 0x61: 0xF709, 0x62: 0xF70A, 0x64: 0xF70B,  // F5–F8
+        0x65: 0xF70C, 0x6D: 0xF70D, 0x67: 0xF70E, 0x6F: 0xF70F,  // F9–F12
+        0x24: 0x000D,  // return
+        0x30: 0x0009,  // tab
+        0x31: 0x0020,  // space
+        0x33: 0x0008,  // delete
+        0x35: 0x001B,  // escape
+    ]
 
     /// True when the app exposes a menu we can present. Mullvad and Raycast do
     /// not, and fall back to being revealed in the bar instead.
@@ -121,6 +167,12 @@ enum AXMenuDriver {
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(e, attribute as CFString, &value) == .success else { return nil }
         return value as? String
+    }
+
+    private static func int(_ e: AXUIElement, _ attribute: String) -> Int? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(e, attribute as CFString, &value) == .success else { return nil }
+        return (value as? NSNumber)?.intValue
     }
 
     private static func bool(_ e: AXUIElement, _ attribute: String) -> Bool? {
