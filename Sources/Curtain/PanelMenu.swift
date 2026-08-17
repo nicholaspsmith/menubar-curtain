@@ -9,13 +9,22 @@ import CurtainCore
 /// read live over the accessibility API, so a hidden app stays usable without any
 /// icon moving anywhere.
 final class PanelMenu: NSObject, NSMenuDelegate {
-    private var pidForMenu: [ObjectIdentifier: pid_t] = [:]
+    private struct Owner {
+        let pid: pid_t
+        let name: String
+    }
+
+    private var ownerForMenu: [ObjectIdentifier: Owner] = [:]
 
     /// - Parameter manage: the checklist of which icons are hidden, appended so
     ///   it sits where someone looking at the hidden items would reach for it.
     func build(hidden apps: [HiddenApp], manage: NSMenu?) -> NSMenu {
         let menu = NSMenu()
-        pidForMenu.removeAll()
+        // A row whose only job is to hold a submenu has no action, and automatic
+        // enabling greys such rows out: the submenu still opened on hover, but
+        // clicking the app did nothing at all.
+        menu.autoenablesItems = false
+        ownerForMenu.removeAll()
 
         if apps.isEmpty {
             let empty = NSMenuItem(title: "No hidden icons", action: nil, keyEquivalent: "")
@@ -31,8 +40,9 @@ final class PanelMenu: NSObject, NSMenuDelegate {
             }
             if AXMenuDriver.hasMenu(forPID: app.pid) {
                 let submenu = NSMenu()
+                submenu.autoenablesItems = false
                 submenu.delegate = self
-                pidForMenu[ObjectIdentifier(submenu)] = app.pid
+                ownerForMenu[ObjectIdentifier(submenu)] = Owner(pid: app.pid, name: app.name)
                 item.submenu = submenu
             } else {
                 // No menu to present, so press the icon itself — for an app like
@@ -62,7 +72,8 @@ final class PanelMenu: NSObject, NSMenuDelegate {
     /// app to open it, and doing that for every hidden app on every click would
     /// be both slow and rude.
     func menuNeedsUpdate(_ menu: NSMenu) {
-        guard let pid = pidForMenu[ObjectIdentifier(menu)] else { return }
+        guard let owner = ownerForMenu[ObjectIdentifier(menu)] else { return }
+        let pid = owner.pid
         menu.removeAllItems()
         for row in AXMenuDriver.rows(forPID: pid) {
             if row.isSeparator {
@@ -83,10 +94,14 @@ final class PanelMenu: NSObject, NSMenuDelegate {
             item.isEnabled = row.isEnabled
             menu.addItem(item)
         }
+        // An app that looked like it had a menu but produced no rows is still
+        // reachable: pressing its icon is what it does. Never leave a hidden app
+        // with no way in.
         if menu.items.isEmpty {
-            let empty = NSMenuItem(title: "No menu", action: nil, keyEquivalent: "")
-            empty.isEnabled = false
-            menu.addItem(empty)
+            let open = NSMenuItem(title: "Open \(owner.name)", action: #selector(openApp(_:)), keyEquivalent: "")
+            open.target = self
+            open.representedObject = RowRef(pid: pid, index: -1)
+            menu.addItem(open)
         }
     }
 
