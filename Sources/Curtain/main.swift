@@ -15,6 +15,7 @@ import StatusItemKit
 final class App: NSObject, NSApplicationDelegate {
     private var controller: StatusItemController!
     private var handle: Handle!
+    private var panel: PanelMenu!
     private let line = Line()
     private var isHidden = true
     /// False until the menu bar has had a chance to place our narrow items.
@@ -51,8 +52,9 @@ final class App: NSObject, NSApplicationDelegate {
             onPoll: { [weak self] in self?.applyState() },
             onBuildMenu: { [weak self] menu in self?.buildMenu(menu) },
             autosaveName: "CurtainHandle",
-            onPrimaryClick: { [weak self] in self?.toggle() }
+            onPrimaryClick: { [weak self] in self?.showPanel() }
         )
+        panel = PanelMenu(onReveal: { [weak self] in self?.toggle() })
         handle = Handle(controller: controller)
         controller.start()
         settleThenApply()
@@ -165,6 +167,17 @@ final class App: NSObject, NSApplicationDelegate {
             menu.addItem(item)
         }
         return menu
+    }
+
+    /// Left click drops the hidden icons down as a menu, each with its own real
+    /// menu inside. Nothing moves and nothing disappears — the whole point of
+    /// presenting them here rather than shuffling the bar to make them visible.
+    private func showPanel() {
+        let apps = HiddenApps.current(
+            in: MenuBarGeometry.current(),
+            ownPID: ProcessInfo.processInfo.processIdentifier
+        )
+        controller.popUp(panel.build(hidden: apps, isRevealed: !isHidden))
     }
 
     // MARK: - Menu selectors
