@@ -23,9 +23,6 @@ final class App: NSObject, NSApplicationDelegate {
     private var revealMode = RevealModeStore.load(from: .standard)
     private var peekToken = UUID().uuidString
     private static let settleDelay: TimeInterval = 1.5
-    /// Long enough for the siblings to reappear and be placed before the line
-    /// widens over the space they need.
-    private static let restoreDelay: TimeInterval = 0.6
     /// Comfortably longer than the 5s poll that refreshes it, short enough that a
     /// crashed Curtain returns the sibling icons quickly.
     private static let yieldTTL: TimeInterval = 15
@@ -117,26 +114,24 @@ final class App: NSObject, NSApplicationDelegate {
     // MARK: - Menu
 
     private func buildMenu(_ menu: NSMenu) {
+        // No show/hide row: the handle itself is the toggle, and a menu entry
+        // duplicating a left click is just noise.
         menu.removeAllItems()
-        menu.addItem(actionItem(isHidden ? "Show Icons Briefly" : "Hide Icons Now", #selector(toggle)))
 
         if AXMenuBar.isTrusted {
             let stranded = Watchdog.stranded(
                 in: MenuBarGeometry.current(),
                 ownPID: ProcessInfo.processInfo.processIdentifier
             )
-            if !stranded.isEmpty {
-                menu.addItem(.separator())
-                for item in stranded {
-                    menu.addItem(disabledItem("⚠ \(item.name) is in the notch dead zone"))
-                }
+            for item in stranded {
+                menu.addItem(disabledItem("⚠ \(item.name) is in the notch dead zone"))
             }
         } else {
-            menu.addItem(.separator())
             menu.addItem(actionItem("⚠ Grant Accessibility…", #selector(grantTrust)))
         }
 
-        menu.addItem(.separator())
+        // Only once something is above it, or the menu opens on a stray line.
+        if !menu.items.isEmpty { menu.addItem(.separator()) }
 
         let reveal = NSMenuItem(title: "When Showing", action: nil, keyEquivalent: "")
         reveal.submenu = buildRevealMenu()
@@ -180,20 +175,16 @@ final class App: NSObject, NSApplicationDelegate {
         isHidden.toggle()
         if !isHidden { peekToken = UUID().uuidString }
 
+        applyState()
         if isHidden {
-            // Widen the line *first*, then hand the slots back. During a peek the
-            // visible strip is full of the revealed block, so siblings restored
-            // into it have nowhere to go and land inside the hidden block
-            // instead — measured, all four at x≈-1200. Growing the line clears
-            // the strip, and only then is there room for them to return to their
-            // ranked spots.
-            applyState()
-            DispatchQueue.main.asyncAfter(deadline: .now() + Self.restoreDelay) { [weak self] in
-                guard let self, self.isHidden else { return }
-                MenuBarYield.post(.init(state: .restore, token: self.peekToken, ttl: 0))
-            }
-        } else {
-            applyState()
+            // Widen the line first, then hand the width back — both in the same
+            // turn of the run loop, so the icons return together rather than the
+            // bar visibly filling in twice.
+            //
+            // This used to wait 0.6s, back when yielding hid items outright and a
+            // sibling restored too early had nowhere to land. Yielding by width
+            // keeps every item in place, so there is nothing left to wait for.
+            MenuBarYield.post(.init(state: .restore, token: peekToken, ttl: 0))
         }
 
         rehideTimer?.invalidate()
