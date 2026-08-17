@@ -19,7 +19,10 @@ final class App: NSObject, NSApplicationDelegate {
     private var isHidden = true
     /// False until the menu bar has had a chance to place our narrow items.
     private var hasSettled = false
+    private var rehideTimer: Timer?
     private static let settleDelay: TimeInterval = 1.5
+    /// How long a reveal lasts before it puts itself away.
+    private static let revealDuration: TimeInterval = 15
 
     /// Where to park our two items on a bar we have never seen.
     ///
@@ -98,7 +101,24 @@ final class App: NSObject, NSApplicationDelegate {
 
     private func buildMenu(_ menu: NSMenu) {
         menu.removeAllItems()
-        menu.addItem(actionItem(isHidden ? "Show Icons" : "Hide Icons", #selector(toggle)))
+        menu.addItem(actionItem(isHidden ? "Show Icons Briefly" : "Hide Icons Now", #selector(toggle)))
+
+        if AXMenuBar.isTrusted {
+            let stranded = Watchdog.stranded(
+                in: MenuBarGeometry.current(),
+                ownPID: ProcessInfo.processInfo.processIdentifier
+            )
+            if !stranded.isEmpty {
+                menu.addItem(.separator())
+                for item in stranded {
+                    menu.addItem(disabledItem("⚠ \(item.name) is in the notch dead zone"))
+                }
+            }
+        } else {
+            menu.addItem(.separator())
+            menu.addItem(actionItem("⚠ Grant Accessibility…", #selector(grantTrust)))
+        }
+
         menu.addItem(.separator())
 
         let login = actionItem("Start at Login", #selector(toggleLogin))
@@ -115,12 +135,33 @@ final class App: NSObject, NSApplicationDelegate {
         return item
     }
 
+    private func disabledItem(_ title: String) -> NSMenuItem {
+        NSMenuItem(title: title, action: nil, keyEquivalent: "")
+    }
+
     // MARK: - Menu selectors
 
+    /// Revealing is always temporary.
+    ///
+    /// A packed bar has no room for the block *and* our handle, so revealing
+    /// squeezes the handle into the notch sliver where it draws nothing — the
+    /// control vanishes and there is no way back. Rather than leave that trap,
+    /// a reveal reverses itself.
     @objc private func toggle() {
         isHidden.toggle()
         applyState()
+
+        rehideTimer?.invalidate()
+        rehideTimer = nil
+        guard !isHidden else { return }
+        rehideTimer = Timer.scheduledTimer(withTimeInterval: Self.revealDuration, repeats: false) { [weak self] _ in
+            guard let self, !self.isHidden else { return }
+            self.isHidden = true
+            self.applyState()
+        }
     }
+
+    @objc private func grantTrust() { AXMenuBar.requestTrust() }
 
     @objc private func toggleLogin() { LoginItem.toggle() }
 
