@@ -72,7 +72,12 @@ final class PanelMenu: NSObject, NSMenuDelegate {
             // A row's own title can be several lines (account details, say);
             // keep the first, which is the part that identifies it.
             let title = row.title.components(separatedBy: .newlines).first ?? row.title
-            let item = NSMenuItem(title: title, action: #selector(pressRow(_:)), keyEquivalent: "")
+            let item = NSMenuItem(
+                title: title,
+                action: #selector(pressRow(_:)),
+                keyEquivalent: row.keyEquivalent
+            )
+            item.keyEquivalentModifierMask = row.modifiers
             item.target = self
             item.representedObject = RowRef(pid: pid, index: row.index)
             item.isEnabled = row.isEnabled
