@@ -309,16 +309,59 @@ final class App: NSObject, NSApplicationDelegate {
                   let target = items.first(where: { $0.pid == app.pid })
             else { return }
 
-            // Showing drops the icon to the right of the *handle*, not merely
-            // past the line. Ranking it between the two lands it in the leftmost
-            // visible slot — the notch sliver — where it draws nothing: measured,
-            // an icon moved back that way sat invisibly at x=831.
-            let dropX = app.isHidden ? handleX + 45 : lineX - 25
+            let dropX: CGFloat
+            if app.isHidden {
+                dropX = self.restoreTarget(for: target, among: items, fallback: handleX + 45)
+            } else {
+                self.rememberPlacement(of: target, among: items)
+                dropX = lineX - 25
+            }
+
             let result = Arranger.move(target, toX: dropX, in: MenuBarGeometry.current())
-            if case .failure(let failure) = result {
+            switch result {
+            case .success:
+                // Only once it is actually back does the remembered spot stop
+                // mattering; a failed restore should still know where to aim.
+                if app.isHidden { PlacementStore.forget(target.key, in: .standard) }
+            case .failure(let failure):
                 self.report(failure, for: app.name)
             }
         }
+    }
+
+    /// Note where an icon sits before hiding it, so unhiding can put it back in
+    /// the same slot instead of dumping it at the end of the row.
+    ///
+    /// The landmark is the icon immediately to its right, not its own x: an x is
+    /// only meaningful against the layout it was measured in, and the bar reflows
+    /// every time anything appears, hides or yields.
+    private func rememberPlacement(of item: MenuBarItem, among items: [MenuBarItem]) {
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        let neighbour = items
+            .filter { $0.pid != item.pid && $0.pid != ownPID }
+            .filter { $0.frame.minX >= item.frame.maxX }
+            .min { $0.frame.minX < $1.frame.minX }
+
+        PlacementStore.save(
+            HidePlacement(rightNeighbour: neighbour?.key, x: item.frame.minX),
+            for: item.key,
+            to: .standard
+        )
+    }
+
+    /// Where a restored icon should land: beside the neighbour it used to sit
+    /// left of, or failing that wherever it was, or failing that the end of the
+    /// row.
+    private func restoreTarget(
+        for item: MenuBarItem,
+        among items: [MenuBarItem],
+        fallback: CGFloat
+    ) -> CGFloat {
+        let placement = PlacementStore.placement(for: item.key, in: .standard)
+        let neighbour = placement?.rightNeighbour
+            .flatMap { id in items.first { $0.key == id } }
+            .map(\.frame)
+        return DropTarget.x(for: placement, neighbour: neighbour, fallback: fallback)
     }
 
     /// Say what went wrong rather than leaving an icon somewhere invisible —

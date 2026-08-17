@@ -8,6 +8,10 @@ struct MenuBarItem {
     let bundleID: String?
     let pid: pid_t
     let frame: ItemFrame
+
+    /// Stable across relaunches, unlike a pid — what remembered placements are
+    /// filed under. Falls back to the name for apps with no bundle identifier.
+    var key: String { bundleID ?? name }
 }
 
 /// Reads every app's status item position through the accessibility API.
