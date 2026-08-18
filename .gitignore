@@ -2,3 +2,4 @@ restore-positions.sh
 .build/
 build/
 .DS_Store
+menubar-baseline.txt
